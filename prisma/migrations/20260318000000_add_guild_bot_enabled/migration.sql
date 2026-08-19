@@ -1,0 +1,2 @@
+ALTER TABLE "GuildConfig"
+ADD COLUMN "botEnabled" BOOLEAN NOT NULL DEFAULT true;

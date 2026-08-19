@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model GuildConfig {
+  guildId       String      @id
+  guildName     String
+  botEnabled    Boolean     @default(true)
+  logChannelId  String?
+  musicVolume   Int         @default(50)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  logRecords    LogRecord[]
+}
+
+model LogRecord {
+  id          String      @id @default(cuid())
+  guildId     String
+  guildName   String
+  channelId   String?
+  userId      String?
+  targetId    String?
+  action      String
+  message     String
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+model AdminUser {
+  id            String         @id @default(cuid())
+  username      String         @unique
+  passwordHash  String
+  lastLoginAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  sessions      AdminSession[]
+}
+
+model AdminSession {
+  id           String    @id
+  adminUserId  String
+  expiresAt    DateTime
+  lastSeenAt   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  adminUser    AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
+  @@index([expiresAt])
+}
+
+model SystemConfig {
+  id               Int      @id @default(1)
+  ownerDiscordIds  String   @default("448715770696826890")
+  queuePageSize    Int      @default(10)
+  idleMorningText  String   @default("Chào buổi sáng")
+  idleNoonText     String   @default("Chúc buổi trưa nhẹ nhàng")
+  idleEveningText  String   @default("Chào buổi tối")
+  idleNightText    String   @default("Chúc ngủ ngon")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model CommandPolicy {
+  commandName  String             @id
+  accessLevel  CommandAccessLevel @default(EVERYONE)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+}
+
+model ScheduledMessage {
+  id            String                    @id @default(cuid())
+  name          String
+  guildId       String
+  channelId     String
+  message       String
+  frequency     ScheduledMessageFrequency
+  daysOfWeek    String?
+  hour          Int?
+  minute        Int?
+  runAt         DateTime?
+  enabled       Boolean                   @default(true)
+  lastSentAt    DateTime?
+  nextRunAt     DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  @@index([enabled, nextRunAt(sort: Asc)])
+  @@index([guildId, enabled])
+}
+
+enum CommandAccessLevel {
+  EVERYONE
+  OWNER
+}
+
+enum ScheduledMessageFrequency {
+  DAILY
+  WEEKLY
+  ONCE
+}
