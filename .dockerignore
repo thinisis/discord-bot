@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+runtime
+release
+coverage
+discord-control
+*.test
+frontend/node_modules
+frontend/.vite
+**/node_modules

@@ -1,0 +1,58 @@
+name: discord-bot
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: discord
+      POSTGRES_USER: discord
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U discord -d discord"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  lavalink-init:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    user: "0:0"
+    entrypoint: ["sh", "-c", "chown -R 322:322 /plugins"]
+    volumes:
+      - lavalink-plugins:/plugins
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    depends_on:
+      lavalink-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD}
+      _JAVA_OPTIONS: -Xms128m -Xmx512m
+    volumes:
+      - ../infra/lavalink/application.yml.example:/opt/Lavalink/application.yml:ro
+      - lavalink-plugins:/opt/Lavalink/plugins
+  app:
+    build: ..
+    image: thinnguyen-discord-bot:go
+    restart: unless-stopped
+    env_file: ../.env
+    ports:
+      - 127.0.0.1:3817:3000
+    volumes:
+      - runtime:/app/runtime
+    depends_on:
+      db:
+        condition: service_healthy
+      lavalink:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+volumes:
+  postgres-data:
+  runtime:
+  lavalink-plugins:

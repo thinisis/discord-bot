@@ -1,6 +1,6 @@
 server:
   port: ${SERVER_PORT:2333}
-  address: 127.0.0.1
+  address: 0.0.0.0
 
 lavalink:
   server:
@@ -19,7 +19,7 @@ lavalink:
     trackStuckThresholdMs: 10000
     youtubePlaylistLoadLimit: 100
   plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.0"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
       snapshot: false
 
 plugins:
@@ -31,6 +31,8 @@ plugins:
     clients:
       - MUSIC
       - ANDROID_VR
+      - TVHTML5_SIMPLY
+      - IOS
       - WEB
       - WEBEMBEDDED
 

@@ -1,0 +1,36 @@
+{
+  "name": "discord-control-ui",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "shared/cli-ui"
+  ],
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "type-check": "tsc --noEmit",
+    "test": "bun test",
+    "verify": "bun run test && bun run build"
+  },
+  "dependencies": {
+    "@tnvn/cli-ui": "workspace:*",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router-dom": "7.18.1",
+    "motion": "12.42.2",
+    "zustand": "5.0.14",
+    "i18next": "26.3.6",
+    "react-i18next": "17.0.9"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/node": "^22.0.0",
+    "@vitejs/plugin-react": "6.0.3",
+    "typescript": "6.0.3",
+    "vite": "8.1.4",
+    "sass": "1.101.0"
+  }
+}
