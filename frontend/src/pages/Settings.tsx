@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Account } from './Account';
+import { YoutubeOAuth } from './YoutubeOAuth';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   Heading,
@@ -39,7 +40,7 @@ export function Settings() {
     guilds = useResource<Guild[]>('/guilds');
   const [params, setParams] = useSearchParams();
   const requestedTab = params.get('tab') || 'system';
-  const tab = ['system', 'policies', 'schedules', 'account'].includes(requestedTab)
+  const tab = ['system', 'policies', 'schedules', 'account', 'youtube'].includes(requestedTab)
     ? requestedTab
     : 'system';
   const setTab = (value: string) => setParams(value === 'system' ? {} : { tab: value });
@@ -59,6 +60,7 @@ export function Settings() {
           { value: 'policies', label: 'Quyền lệnh' },
           { value: 'schedules', label: 'Lịch gửi tin nhắn' },
           { value: 'account', label: 'Tài khoản' },
+          { value: 'youtube', label: 'YouTube' },
         ]}
       />
       {resource.error && <ErrorNotice message={resource.error} retry={resource.reload} />}
@@ -78,6 +80,8 @@ export function Settings() {
                 <SystemForm config={resource.data.system} />
               ) : tab === 'policies' ? (
                 <Policies data={resource.data} />
+              ) : tab === 'youtube' ? (
+                <YoutubeOAuth />
               ) : tab === 'account' ? (
                 <Account />
               ) : (

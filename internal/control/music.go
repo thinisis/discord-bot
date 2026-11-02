@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"github.com/gorilla/websocket"
@@ -21,6 +20,7 @@ type Track struct {
 	Encoded string `json:"encoded"`
 	Info    struct {
 		Identifier string `json:"identifier"`
+		SourceName string `json:"sourceName"`
 		Title      string `json:"title"`
 		Author     string `json:"author"`
 		Length     int64  `json:"length"`
@@ -42,6 +42,7 @@ type Player struct {
 	Connected                bool    `json:"connected"`
 	Failures                 int     `json:"-"`
 	Session, Endpoint, Token string  `json:"-"`
+	voiceSync                sync.Mutex
 	voiceVersion             uint64
 	sentVersion              uint64
 	failedEncoded            string
@@ -88,7 +89,7 @@ func (m *Music) request(ctx context.Context, method, path string, body any, out 
 	defer res.Body.Close()
 	if res.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
-		return fmt.Errorf("Lavalink HTTP %d: %s", res.StatusCode, truncate(string(b), 250))
+		return &lavalinkHTTPError{Status: res.StatusCode, Detail: truncate(string(b), 250)}
 	}
 	if out != nil {
 		return json.NewDecoder(io.LimitReader(res.Body, 8<<20)).Decode(out)
@@ -183,6 +184,9 @@ func (m *Music) Run(ctx context.Context, user string) {
 			m.mu.Unlock()
 		}
 		m.connected.Store(false)
+		if m.bot.app.youtube != nil {
+			m.bot.app.youtube.applied.Store(false)
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -204,6 +208,9 @@ func (m *Music) Run(ctx context.Context, user string) {
 	}
 }
 func (m *Music) onReady(ctx context.Context, sid string, resumed bool) {
+	if m.bot.app.youtube != nil {
+		go m.bot.app.youtube.restore(ctx)
+	}
 	if e := m.request(ctx, "PATCH", "/v4/sessions/"+sid, map[string]any{"resuming": true, "timeout": 60}, nil); e != nil {
 		m.bot.app.record("warn", e.Error())
 	}
@@ -268,7 +275,7 @@ func (m *Music) update(guild string, payload any) error {
 	sid := m.session
 	m.mu.Unlock()
 	if !m.connected.Load() || sid == "" {
-		return errors.New("Lavalink chưa sẵn sàng, hãy thử lại sau.")
+		return musicUserError("Lavalink chưa sẵn sàng, hãy thử lại sau.")
 	}
 	return m.request(m.bot.ctx, "PATCH", "/v4/sessions/"+sid+"/players/"+guild+"?noReplace=false", payload, nil)
 }
@@ -276,7 +283,7 @@ func (m *Music) Load(query string) ([]Track, string, error) {
 	query = strings.TrimSpace(query)
 	searchAll := strings.HasPrefix(query, "ytsearch:") || strings.HasPrefix(query, "ytmsearch:") || strings.HasPrefix(query, "scsearch:")
 	if query == "" || len(query) > 2000 {
-		return nil, "", errors.New("Từ khóa không hợp lệ.")
+		return nil, "", musicUserError("Từ khóa không hợp lệ.")
 	}
 	if !strings.HasPrefix(query, "https://") && !strings.HasPrefix(query, "http://") && !strings.HasPrefix(query, "ytsearch:") && !strings.HasPrefix(query, "ytmsearch:") && !strings.HasPrefix(query, "scsearch:") {
 		query = "ytsearch:" + query
@@ -334,7 +341,7 @@ func (m *Music) Load(query string) ([]Track, string, error) {
 		return nil, "", fmt.Errorf("Không tải được nhạc: %s", errData.Message)
 	}
 	if len(tracks) == 0 {
-		return nil, "", errors.New("Không tìm thấy bài hát.")
+		return nil, "", musicUserError("Không tìm thấy bài hát.")
 	}
 	if len(tracks) > m.bot.app.cfg.PlaylistMax {
 		tracks = tracks[:m.bot.app.cfg.PlaylistMax]
@@ -343,18 +350,18 @@ func (m *Music) Load(query string) ([]Track, string, error) {
 }
 func (m *Music) Join(guild, channel, text string) error {
 	if channel == "" {
-		return errors.New("Bạn cần vào voice channel hoặc chọn kênh đích.")
+		return musicUserError("Bạn cần vào voice channel hoặc chọn kênh đích.")
 	}
 	if !m.connected.Load() {
-		return errors.New("Lavalink chưa sẵn sàng.")
+		return musicUserError("Lavalink chưa sẵn sàng.")
 	}
 	ch, e := m.bot.session.Channel(channel)
 	if e != nil || ch.GuildID != guild || (ch.Type != discordgo.ChannelTypeGuildVoice && ch.Type != discordgo.ChannelTypeGuildStageVoice) {
-		return errors.New("Voice channel không hợp lệ.")
+		return musicUserError("Voice channel không hợp lệ.")
 	}
 	permissions, e := m.bot.session.UserChannelPermissions(m.bot.UserID(), channel)
 	if e != nil || permissions&discordgo.PermissionVoiceConnect == 0 || permissions&discordgo.PermissionVoiceSpeak == 0 {
-		return errors.New("Bot cần quyền Connect và Speak trong kênh này.")
+		return musicUserError("Bot cần quyền Connect và Speak trong kênh này.")
 	}
 	var volume int
 	m.bot.app.db.QueryRow(m.bot.ctx, `SELECT "musicVolume" FROM "GuildConfig" WHERE "guildId"=$1`, guild).Scan(&volume)
@@ -366,7 +373,7 @@ func (m *Music) Join(guild, channel, text string) error {
 	}
 	if p.ChannelID != "" && p.ChannelID != channel && p.Current != nil {
 		m.mu.Unlock()
-		return errors.New("Bot đang phát tại một voice channel khác.")
+		return musicUserError("Bot đang phát tại một voice channel khác.")
 	}
 	p.TextID = text
 	needs := p.ChannelID != channel || p.Session == "" || p.Endpoint == "" || p.Token == ""
@@ -410,13 +417,22 @@ func (m *Music) Join(guild, channel, text string) error {
 		complete := p != nil && p.ChannelID == channel && p.Session != "" && p.Endpoint != "" && p.Token != ""
 		m.mu.Unlock()
 		if complete {
-			return m.syncVoice(guild)
+			if err := m.syncVoice(guild); err != nil {
+				return err
+			}
+			m.mu.Lock()
+			p = m.players[guild]
+			synced := p != nil && p.ChannelID == channel && p.Session != "" && p.Endpoint != "" && p.Token != "" && p.voiceVersion != 0 && p.sentVersion == p.voiceVersion
+			m.mu.Unlock()
+			if synced {
+				return nil
+			}
 		}
 		select {
 		case <-m.bot.ctx.Done():
 			return m.bot.ctx.Err()
 		case <-deadline.C:
-			return errors.New("Discord chưa gửi đủ voice state. Kiểm tra quyền bot rồi thử /join lại.")
+			return musicUserError("Discord chưa gửi đủ voice state. Kiểm tra quyền bot rồi thử /join lại.")
 		case <-tick.C:
 		}
 	}
@@ -468,7 +484,16 @@ func (m *Music) VoiceServer(v *discordgo.VoiceServerUpdate) {
 func (m *Music) syncVoice(guild string) error {
 	m.mu.Lock()
 	p := m.players[guild]
-	if p == nil || p.ChannelID == "" || p.Session == "" || p.Token == "" || p.Endpoint == "" {
+	m.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	// Serialize voice updates for each player; Discord may deliver state and server
+	// events concurrently while Join is waiting for both.
+	p.voiceSync.Lock()
+	defer p.voiceSync.Unlock()
+	m.mu.Lock()
+	if m.players[guild] != p || p.ChannelID == "" || p.Session == "" || p.Token == "" || p.Endpoint == "" {
 		m.mu.Unlock()
 		return nil
 	}
@@ -477,12 +502,12 @@ func (m *Music) syncVoice(guild string) error {
 		m.mu.Unlock()
 		return nil
 	}
-	voice := map[string]any{"sessionId": p.Session, "token": p.Token, "endpoint": p.Endpoint}
+	voice := map[string]any{"sessionId": p.Session, "token": p.Token, "endpoint": p.Endpoint, "channelId": p.ChannelID}
 	m.mu.Unlock()
 	e := m.update(guild, map[string]any{"voice": voice})
 	if e == nil {
 		m.mu.Lock()
-		if p = m.players[guild]; p != nil {
+		if m.players[guild] == p {
 			p.sentVersion = v
 		}
 		m.mu.Unlock()
@@ -491,7 +516,7 @@ func (m *Music) syncVoice(guild string) error {
 }
 func (m *Music) Enqueue(guild, voice, text, user string, tracks []Track) error {
 	if len(tracks) == 0 {
-		return errors.New("Không có bài hát.")
+		return musicUserError("Không có bài hát.")
 	}
 	if e := m.Join(guild, voice, text); e != nil {
 		return e
@@ -501,6 +526,10 @@ func (m *Music) Enqueue(guild, voice, text, user string, tracks []Track) error {
 	}
 	m.mu.Lock()
 	p := m.players[guild]
+	if p == nil || p.ChannelID != voice {
+		m.mu.Unlock()
+		return musicUserError("Kết nối voice đã thay đổi. Hãy thử lại.")
+	}
 	p.Queue = append(p.Queue, tracks...)
 	start := p.Current == nil
 	if start {
@@ -550,7 +579,7 @@ func (m *Music) play(guild string, t Track) error {
 	p := m.players[guild]
 	if p == nil {
 		m.mu.Unlock()
-		return errors.New("Player không tồn tại.")
+		return musicUserError("Player không tồn tại.")
 	}
 	volume := p.Volume
 	paused := p.Paused
@@ -575,7 +604,7 @@ func (m *Music) Pause(guild string, value bool) error {
 	p := m.players[guild]
 	if p == nil || p.Current == nil {
 		m.mu.Unlock()
-		return errors.New("Chưa có bài đang phát.")
+		return musicUserError("Chưa có bài đang phát.")
 	}
 	m.mu.Unlock()
 	if e := m.update(guild, map[string]any{"paused": value}); e != nil {
@@ -590,13 +619,13 @@ func (m *Music) Pause(guild string, value bool) error {
 }
 func (m *Music) Volume(guild string, value int) error {
 	if value < 0 || value > 200 {
-		return errors.New("Âm lượng phải từ 0 đến 200.")
+		return musicUserError("Âm lượng phải từ 0 đến 200.")
 	}
 	m.mu.Lock()
 	p := m.players[guild]
 	m.mu.Unlock()
 	if p == nil {
-		return errors.New("Bot chưa vào voice.")
+		return musicUserError("Bot chưa vào voice.")
 	}
 	if e := m.update(guild, map[string]any{"volume": value}); e != nil {
 		return e
@@ -614,12 +643,12 @@ func (m *Music) Skip(guild string, position int, all bool) error {
 	p := m.players[guild]
 	if p == nil {
 		m.mu.Unlock()
-		return errors.New("Chưa có player.")
+		return musicUserError("Chưa có player.")
 	}
 	if position > 0 && !all {
 		if position > len(p.Queue) {
 			m.mu.Unlock()
-			return errors.New("Vị trí queue không hợp lệ.")
+			return musicUserError("Vị trí queue không hợp lệ.")
 		}
 		p.Queue = append(p.Queue[:position-1], p.Queue[position:]...)
 		m.mu.Unlock()
@@ -687,7 +716,7 @@ func (m *Music) event(msg map[string]json.RawMessage) {
 		json.Unmarshal(msg["exception"], &ex)
 		m.mu.Unlock()
 		m.bot.app.record("error", "Playback "+track.Info.Identifier+": "+ex.Message+" "+truncate(ex.Cause, 300))
-		m.bot.send(text, "Không phát được **"+truncate(track.Info.Title, 150)+"**: "+truncate(ex.Message, 250))
+		m.bot.send(text, "Không phát được **"+truncate(track.Info.Title, 150)+"**. "+playbackFailureMessage(track, ex.Message, ex.Cause))
 		return
 	case "TrackEndEvent":
 		var reason string

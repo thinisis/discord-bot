@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS "IntegrationSecret" (
+  "name" TEXT PRIMARY KEY,
+  "ciphertext" BYTEA NOT NULL,
+  "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

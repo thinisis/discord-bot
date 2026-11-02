@@ -20,11 +20,19 @@ services:
     entrypoint: ["sh", "-c", "chown -R 322:322 /plugins"]
     volumes:
       - lavalink-plugins:/plugins
+  youtube-cipher:
+    image: ghcr.io/kikkia/yt-cipher@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449
+    restart: unless-stopped
+    environment:
+      OVERRIDE_PLAYER_VARIANT: IAS
+      MAX_THREADS: 2
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4.2.2
     depends_on:
       lavalink-init:
         condition: service_completed_successfully
+      youtube-cipher:
+        condition: service_started
     restart: unless-stopped
     environment:
       LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD}

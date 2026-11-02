@@ -57,7 +57,10 @@ func (b *Bot) Start(ctx context.Context) error {
 	})
 	s.AddHandler(func(s *discordgo.Session, e *discordgo.Disconnect) { b.ready.Store(false) })
 	s.AddHandler(func(s *discordgo.Session, e *discordgo.Resumed) { b.ready.Store(true) })
-	s.AddHandler(func(s *discordgo.Session, g *discordgo.GuildCreate) { b.upsertGuild(g.Guild) })
+	s.AddHandler(func(s *discordgo.Session, g *discordgo.GuildCreate) {
+		b.upsertGuild(g.Guild)
+		go b.backfillVoiceLogNames(g.ID)
+	})
 	s.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) { go b.interaction(i) })
 	s.AddHandler(func(s *discordgo.Session, v *discordgo.VoiceServerUpdate) { b.music.VoiceServer(v) })
 	s.AddHandler(func(s *discordgo.Session, v *discordgo.VoiceStateUpdate) {
@@ -119,7 +122,7 @@ func (b *Bot) channelLog(ch *discordgo.Channel, action, message string) {
 				when, err := discordgo.SnowflakeTimestamp(entry.ID)
 				if err == nil && entry.TargetID == ch.ID && time.Since(when) < 20*time.Second {
 					actor = entry.UserID
-					message += " · thực hiện bởi <@" + actor + ">"
+					message += " · thực hiện bởi " + b.userLabel(ch.GuildID, actor, nil)
 					break
 				}
 			}
@@ -138,16 +141,13 @@ func (b *Bot) voiceLog(v *discordgo.VoiceStateUpdate) {
 	if old == v.ChannelID {
 		return
 	}
-	action := "VOICE_JOIN"
-	message := "<@" + v.UserID + "> vào voice <#" + v.ChannelID + ">"
-	if v.ChannelID == "" {
-		action = "VOICE_LEAVE"
-		message = "<@" + v.UserID + "> rời voice <#" + old + ">"
-	} else if old != "" {
-		action = "VOICE_MOVE"
-		message = "<@" + v.UserID + "> chuyển từ <#" + old + "> đến <#" + v.ChannelID + ">"
+	user := b.userLabel(v.GuildID, v.UserID, v.Member)
+	action, message := voiceLogMessage(user, old, v.ChannelID, b.channelLabel(old), b.channelLabel(v.ChannelID))
+	channel := v.ChannelID
+	if channel == "" {
+		channel = old
 	}
-	b.app.guildLog(b.ctx, v.GuildID, b.guildName(v.GuildID), action, message, v.ChannelID, v.UserID, "")
+	b.app.guildLog(b.ctx, v.GuildID, b.guildName(v.GuildID), action, message, channel, v.UserID, channel)
 }
 func commands() []*discordgo.ApplicationCommand {
 	s := discordgo.ApplicationCommandOptionString
@@ -335,8 +335,8 @@ func (b *Bot) interaction(i *discordgo.InteractionCreate) {
 		err = fmt.Errorf("Lệnh không hợp lệ.")
 	}
 	if err != nil {
-		message = err.Error()
-		b.app.record("error", "Command /"+name+": "+message)
+		b.app.record("error", "Command /"+name+": "+err.Error())
+		message = musicErrorMessage(err)
 	}
 	b.reply(i, message)
 }
@@ -383,7 +383,8 @@ func (b *Bot) component(i *discordgo.InteractionCreate, u *discordgo.User) {
 			err = b.music.Leave(i.GuildID)
 		}
 		if err != nil {
-			b.reply(i, err.Error())
+			b.app.record("error", "Player action: "+err.Error())
+			b.reply(i, musicErrorMessage(err))
 		} else {
 			b.reply(i, "Đã cập nhật player.")
 		}
@@ -417,7 +418,8 @@ func (b *Bot) component(i *discordgo.InteractionCreate, u *discordgo.User) {
 		return
 	}
 	if e = b.music.Enqueue(i.GuildID, v.ChannelID, i.ChannelID, u.ID, []Track{result.Tracks[index]}); e != nil {
-		b.reply(i, e.Error())
+		b.app.record("error", "Search selection: "+e.Error())
+		b.reply(i, musicErrorMessage(e))
 		return
 	}
 	b.mu.Lock()

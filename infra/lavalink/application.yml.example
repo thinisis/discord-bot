@@ -19,17 +19,21 @@ lavalink:
     trackStuckThresholdMs: 10000
     youtubePlaylistLoadLimit: 100
   plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
-      snapshot: false
+    - dependency: "dev.lavalink.youtube:youtube-plugin:b33460b38ad13b5cd07da75e46444397cf0ea2df"
+      snapshot: true
 
 plugins:
   youtube:
     enabled: true
+    remoteCipher:
+      url: "http://youtube-cipher:8001"
+      userAgent: "discord-control"
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
       - MUSIC
+      - TV
       - ANDROID_VR
       - TVHTML5_SIMPLY
       - IOS
@@ -37,6 +41,8 @@ plugins:
       - WEBEMBEDDED
 
 logging:
+  request:
+    enabled: false
   level:
     root: INFO
     lavalink: INFO

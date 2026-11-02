@@ -100,9 +100,8 @@ export function ThemePicker() {
         value={theme}
         onChange={(v) => setTheme(v as typeof theme)}
         options={[
-          { value: 'light', label: 'Sáng ấm' },
           { value: 'white', label: 'Trắng' },
-          { value: 'dark', label: 'Tối' },
+          { value: 'dark', label: 'Đen' },
           { value: 'auto', label: 'Hệ thống' },
         ]}
       />

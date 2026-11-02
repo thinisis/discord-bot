@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'motion/react';
 import { Button, Input, ThemePicker, Icon } from '../components/UI';
 import { Brand } from '../components/Shell';
@@ -30,7 +30,7 @@ export function Login() {
   return (
     <main className="login-page">
       <section className="login-art">
-        <Brand />
+        <Brand href="/" />
         <div className="login-copy">
           <div className="login-motif" aria-hidden="true">
             {[18, 30, 48, 66, 42, 28, 54, 76, 58, 36, 22, 46, 64, 40, 24].map((h, n) => (
@@ -69,6 +69,7 @@ export function Login() {
         </div>
       </section>
       <section className="login-form-side">
+        <Link to="/" className="login-home-link">← Về trang chủ</Link>
         <div className="login-theme">
           <ThemePicker />
         </div>

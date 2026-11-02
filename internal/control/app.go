@@ -77,6 +77,7 @@ type App struct {
 	attempts map[string]*attempt
 	logFile  *os.File
 	ctx      context.Context
+	youtube  *youtubeOAuth
 }
 
 func (a *App) record(level, message string) {
@@ -117,6 +118,7 @@ func Run(assets fs.FS) error {
 		defer f.Close()
 	}
 	a := &App{cfg: c, db: db, started: time.Now(), assets: assets, attempts: map[string]*attempt{}, logFile: f, ctx: ctx}
+	a.youtube = newYoutubeOAuth(a)
 	a.loadLogs()
 	if err = a.bootstrap(ctx); err != nil {
 		return err
@@ -151,7 +153,14 @@ func migrate(ctx context.Context, db *pgxpool.Pool, files fs.FS) error {
 		return e
 	}
 	if exists {
-		return nil
+		// Existing Node/Go installations already have the initial schema.
+		// Later additive migrations must be explicitly idempotent.
+		b, err := fs.ReadFile(files, "migrations/20261102000000_youtube_oauth.sql")
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(ctx, string(b))
+		return err
 	}
 	names, e := fs.Glob(files, "migrations/*.sql")
 	if e != nil {

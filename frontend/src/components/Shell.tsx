@@ -12,9 +12,9 @@ const navigation = [
   { path: '/logs', icon: 'logs', label: 'Nhật ký hệ thống' },
   { path: '/settings', icon: 'settings', label: 'Cài đặt' },
 ];
-export function Brand() {
+export function Brand({ href = '/dashboard' }: { href?: string }) {
   return (
-    <Link to="/dashboard" className="brand">
+    <Link to={href} className="brand">
       <span className="brand-symbol">
         <Icon name="bot" size={22} />
       </span>

@@ -139,9 +139,16 @@ textarea:focus {
 }
 .theme-picker {
   width: 112px;
+  flex: none;
 }
 .theme-picker button {
   font-size: 12px;
+}
+[role='listbox'][aria-label='Giao diện'] {
+  scrollbar-gutter: auto;
+}
+[role='listbox'][aria-label='Giao diện'] [role='option'] {
+  white-space: nowrap;
 }
 .toolbar .form-group {
   margin: 0;
@@ -434,9 +441,7 @@ textarea:focus {
   justify-content: center;
   gap: 5px;
 }
-.login-art .brand {
-  pointer-events: none;
-}
+
 .error-text {
   color: var(--red);
 }
@@ -499,9 +504,6 @@ textarea:not(:disabled) {
     background: #0005;
     width: 100%;
     height: 100%;
-  }
-  .theme-picker {
-    width: 100px;
   }
   .content {
     padding: 23px 16px;
@@ -583,3 +585,6 @@ textarea:not(:disabled) {
     width: calc(100% - 216px);
   }
 }
+
+.login-home-link { display: none; }
+@media (max-width: 640px) { .login-home-link { display: inline-flex; position: absolute; top: 34px; left: 30px; font-size: 12px; color: var(--sub); } }

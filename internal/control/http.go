@@ -20,6 +20,12 @@ func (a *App) routes() http.Handler {
 		_, name, _ := a.session(r)
 		jsonResponse(w, 200, map[string]string{"username": name})
 	})
+	m.HandleFunc("GET /api/integrations/youtube/oauth", a.youtubeStatus)
+	m.HandleFunc("POST /api/integrations/youtube/oauth/start", a.youtubeStart)
+	m.HandleFunc("POST /api/integrations/youtube/oauth/poll", a.youtubePoll)
+	m.HandleFunc("POST /api/integrations/youtube/oauth/apply", a.youtubeApply)
+	m.HandleFunc("DELETE /api/integrations/youtube/oauth/pending", a.youtubeCancel)
+	m.HandleFunc("DELETE /api/integrations/youtube/oauth", a.youtubeDisconnect)
 	m.HandleFunc("GET /api/status", a.status)
 	m.HandleFunc("GET /api/guilds", a.guilds)
 	m.HandleFunc("PUT /api/guilds/{id}", a.saveGuild)
@@ -46,14 +52,16 @@ func (a *App) routes() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		_, _, err := a.session(r)
-		if err != nil && r.URL.Path != "/login" {
-			http.Redirect(w, r, "/login", 303)
-			return
-		}
-		if err == nil && (r.URL.Path == "/login" || r.URL.Path == "/") {
-			http.Redirect(w, r, "/dashboard", 303)
-			return
+		if r.URL.Path != "/" {
+			_, _, err := a.session(r)
+			if err != nil && r.URL.Path != "/login" {
+				http.Redirect(w, r, "/login", 303)
+				return
+			}
+			if err == nil && r.URL.Path == "/login" {
+				http.Redirect(w, r, "/dashboard", 303)
+				return
+			}
 		}
 		b, _ := fs.ReadFile(web, "index.html")
 		w.Header().Set("Cache-Control", "no-store")

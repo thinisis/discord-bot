@@ -5,7 +5,7 @@ interface Toast {
   message: string;
   error: boolean;
 }
-type Theme = 'light' | 'white' | 'dark' | 'auto';
+type Theme = 'white' | 'dark' | 'auto';
 interface UI {
   theme: Theme;
   setTheme: (v: Theme) => void;
@@ -17,12 +17,12 @@ interface UI {
 }
 const apply = (v: Theme) => {
   document.documentElement.dataset.theme =
-    v === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : v;
+    v === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'white') : v;
   localStorage.setItem('discord-theme', v);
 };
 const stored = localStorage.getItem('discord-theme');
 const initial: Theme =
-  stored === 'dark' || stored === 'white' || stored === 'auto' ? stored : 'light';
+  stored === 'dark' || stored === 'white' || stored === 'auto' ? stored : 'white';
 apply(initial);
 export const useUI = create<UI>((set, get) => ({
   theme: initial,

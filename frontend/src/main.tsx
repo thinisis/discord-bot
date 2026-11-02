@@ -7,6 +7,7 @@ import { initReactI18next } from 'react-i18next';
 import { Shell } from './components/Shell';
 import { Toasts } from './components/UI';
 import { Login } from './pages/Login';
+import { Home } from './pages/Home';
 import { Dashboard } from './pages/Dashboard';
 import { Guilds } from './pages/Guilds';
 import { Music } from './pages/Music';
@@ -15,20 +16,18 @@ import { Settings } from './pages/Settings';
 import { api } from './services/api';
 import { useAuth } from './stores/ui';
 import './styles/main.scss';
-void i18next
-  .use(initReactI18next)
-  .init({
-    lng: 'vi',
-    fallbackLng: 'vi',
-    resources: {
-      vi: {
-        translation: {
-          common: { close: 'Đóng', cancel: 'Hủy', save: 'Lưu', loading: 'Đang tải…' },
-        },
+void i18next.use(initReactI18next).init({
+  lng: 'vi',
+  fallbackLng: 'vi',
+  resources: {
+    vi: {
+      translation: {
+        common: { close: 'Đóng', cancel: 'Hủy', save: 'Lưu', loading: 'Đang tải…' },
       },
     },
-    interpolation: { escapeValue: false },
-  });
+  },
+  interpolation: { escapeValue: false },
+});
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -64,6 +63,7 @@ function Application() {
       <MotionConfig reducedMotion="user">
         <BrowserRouter>
           <Routes>
+            <Route path="/" element={<Home />} />
             <Route
               path="/login"
               element={username ? <Navigate to="/dashboard" replace /> : <Login />}
@@ -85,7 +85,7 @@ function Application() {
 }
 window.addEventListener('session-expired', () => useAuth.getState().setUser(null));
 async function start() {
-  if (location.pathname !== '/login') {
+  if (location.pathname !== '/login' && location.pathname !== '/') {
     try {
       const user = await api<{ username: string }>('/me');
       useAuth.getState().setUser(user.username);
