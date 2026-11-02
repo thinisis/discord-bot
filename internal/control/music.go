@@ -102,6 +102,7 @@ func (m *Music) Run(ctx context.Context, user string) {
 		return
 	}
 	defer m.running.Store(false)
+	go m.reconcileLoop(ctx)
 	delay := time.Second
 	for ctx.Err() == nil {
 		u, e := url.Parse(m.bot.app.cfg.LavaURL)
@@ -204,6 +205,59 @@ func (m *Music) Run(ctx context.Context, user string) {
 		delay *= 2
 		if delay > 15*time.Second {
 			delay = 15 * time.Second
+		}
+	}
+}
+
+// Reconcile near-finished tracks when an end event is lost across a voice or
+// WebSocket interruption. A missing remote track is required before advancing.
+func (m *Music) reconcileLoop(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reconcileFinished(ctx)
+		}
+	}
+}
+
+func (m *Music) reconcileFinished(ctx context.Context) {
+	type candidate struct {
+		guild string
+		track *Track
+	}
+	m.mu.Lock()
+	sid := m.session
+	var candidates []candidate
+	if m.connected.Load() && sid != "" {
+		for guild, p := range m.players {
+			if p.Current != nil && p.Connected && !p.Paused && len(p.Queue) > 0 && !p.Current.Info.IsStream && p.Current.Info.Length > 0 && p.Position > 0 && p.Position >= p.Current.Info.Length-10000 {
+				candidates = append(candidates, candidate{guild, p.Current})
+			}
+		}
+	}
+	m.mu.Unlock()
+	for _, c := range candidates {
+		var remote map[string]json.RawMessage
+		if err := m.request(ctx, "GET", "/v4/sessions/"+sid+"/players/"+c.guild, nil, &remote); err != nil || string(bytes.TrimSpace(remote["track"])) != "null" {
+			continue
+		}
+		m.mu.Lock()
+		p := m.players[c.guild]
+		if m.session != sid || p == nil || p.Current != c.track || !p.Connected || p.Paused || len(p.Queue) == 0 {
+			m.mu.Unlock()
+			continue
+		}
+		p.Current = nil
+		p.Position = 0
+		p.Failures = 0
+		m.mu.Unlock()
+		m.bot.app.record("warn", "Khôi phục chuyển bài sau khi mất sự kiện kết thúc")
+		if err := m.next(c.guild); err != nil {
+			m.bot.app.record("error", "Không thể phát bài tiếp theo: "+err.Error())
 		}
 	}
 }
@@ -565,7 +619,8 @@ func (m *Music) next(guild string) error {
 	m.mu.Unlock()
 	if e := m.play(guild, track); e != nil {
 		m.mu.Lock()
-		if p = m.players[guild]; p != nil {
+		if p = m.players[guild]; p != nil && p.Current == &track {
+			p.Queue = append([]Track{track}, p.Queue...)
 			p.Current = nil
 			p.Paused = true
 		}
@@ -698,10 +753,12 @@ func (m *Music) event(msg map[string]json.RawMessage) {
 			return
 		}
 		m.mu.Unlock()
-		_, err := m.bot.session.ChannelMessageSendComplex(text, &discordgo.MessageSend{Content: "Đang phát **" + truncate(track.Info.Title, 180) + "**", Components: playerComponents(), AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}})
-		if err != nil {
-			m.bot.app.record("error", "Player notification: "+err.Error())
-		}
+		go func() {
+			_, err := m.bot.session.ChannelMessageSendComplex(text, &discordgo.MessageSend{Content: "Đang phát **" + truncate(track.Info.Title, 180) + "**", Components: playerComponents(), AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}})
+			if err != nil {
+				m.bot.app.record("error", "Player notification: "+err.Error())
+			}
+		}()
 		return
 	case "TrackExceptionEvent":
 		if p.Current == nil || p.Current.Encoded != track.Encoded {
@@ -716,7 +773,7 @@ func (m *Music) event(msg map[string]json.RawMessage) {
 		json.Unmarshal(msg["exception"], &ex)
 		m.mu.Unlock()
 		m.bot.app.record("error", "Playback "+track.Info.Identifier+": "+ex.Message+" "+truncate(ex.Cause, 300))
-		m.bot.send(text, "Không phát được **"+truncate(track.Info.Title, 150)+"**. "+playbackFailureMessage(track, ex.Message, ex.Cause))
+		go m.bot.send(text, "Không phát được **"+truncate(track.Info.Title, 150)+"**. "+playbackFailureMessage(track, ex.Message, ex.Cause))
 		return
 	case "TrackEndEvent":
 		var reason string
@@ -727,7 +784,7 @@ func (m *Music) event(msg map[string]json.RawMessage) {
 		}
 		p.Current = nil
 		p.Position = 0
-		if reason == "loadFailed" {
+		if reason == "loadFailed" || p.failedEncoded == track.Encoded {
 			p.Failures++
 		} else {
 			p.Failures = 0
@@ -735,15 +792,24 @@ func (m *Music) event(msg map[string]json.RawMessage) {
 		if p.Failures >= 3 {
 			p.Paused = true
 			m.mu.Unlock()
-			m.bot.send(text, "Đã dừng tự chuyển bài sau 3 lần phát lỗi liên tiếp. Các bài còn lại vẫn được giữ trong queue; kiểm tra nguồn nhạc rồi dùng /play.")
+			go m.bot.send(text, "Đã dừng tự chuyển bài sau 3 lần phát lỗi liên tiếp. Các bài còn lại vẫn được giữ trong queue; kiểm tra nguồn nhạc rồi dùng /play.")
 			return
 		}
 		m.mu.Unlock()
-		if e := m.next(guild); e != nil {
-			m.bot.app.record("error", e.Error())
-		}
+		// Do not block the WebSocket reader while Lavalink handles the next
+		// player update: it must remain able to receive track and voice events.
+		go func() {
+			if e := m.next(guild); e != nil {
+				m.bot.app.record("error", "Không thể phát bài tiếp theo: "+e.Error())
+				m.bot.send(text, "Không thể phát bài tiếp theo. Bài hát vẫn được giữ trong hàng chờ; hãy thử lại /play.")
+			}
+		}()
 		return
 	case "TrackStuckEvent":
+		if p.Current == nil || p.Current.Encoded != track.Encoded {
+			m.mu.Unlock()
+			return
+		}
 		m.mu.Unlock()
 		m.bot.app.record("warn", "Track stuck: "+track.Info.Identifier)
 		m.Skip(guild, 0, false)
